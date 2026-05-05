@@ -1,3 +1,4 @@
+# unpack.py
 import os
 import struct
 import threading
@@ -7,23 +8,23 @@ import tkinter as tk
 from tkinter import filedialog, ttk, scrolledtext
 
 # ============================================================
-# Конфигурация и логирование
+# Configuration and logging
 # ============================================================
 CONFIG_FILE = "pak_unpacker.ini"
 LOG_FILE = "unpacker.log"
 
 LOG_DEBUG = 10
-LOG_INFO = 20
+LOG_INFO  = 20
 LOG_ERROR = 30
 
 LEVEL_NAMES = {
-    LOG_DEBUG: "Подробно",
-    LOG_INFO:  "Кратко",
-    LOG_ERROR: "Только ошибки"
+    LOG_DEBUG: "Detailed",
+    LOG_INFO:  "Brief",
+    LOG_ERROR: "Errors only"
 }
 
 class AppLogger:
-    """Потокобезопасный логгер с записью в файл и выводом в GUI."""
+    """Thread-safe logger with file output and GUI display."""
     def __init__(self, root, gui_widget, level=LOG_INFO):
         self.root = root
         self.widget = gui_widget
@@ -34,11 +35,11 @@ class AppLogger:
     def _init_file(self):
         with self.lock:
             with open(LOG_FILE, 'a', encoding='utf-8') as f:
-                f.write(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S}, уровень: {LEVEL_NAMES.get(self.level, '?')} =====\n")
+                f.write(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S}, level: {LEVEL_NAMES.get(self.level, '?')} =====\n")
 
     def change_level(self, new_level):
         self.level = new_level
-        self._log_text(f"Уровень логирования изменён на: {LEVEL_NAMES.get(new_level, new_level)}\n", "blue")
+        self._log_text(f"Log level changed to: {LEVEL_NAMES.get(new_level, new_level)}\n", "blue")
 
     def _log_text(self, message, color_tag=None):
         def _write():
@@ -80,20 +81,20 @@ class AppLogger:
 
 
 # ============================================================
-# Основная функция распаковки (исправленная)
+# Core unpacking function (fixed)
 # ============================================================
 def unpack_pak(pak_path, output_base, logger):
     """
-    Полностью повторяет алгоритм BMS-скрипта.
+    Fully replicates the BMS script algorithm.
     """
-    logger.info(f"Начало распаковки: {pak_path} -> {output_base}")
+    logger.info(f"Starting unpack: {pak_path} -> {output_base}")
     try:
         with open(pak_path, 'rb') as f:
             # idstring "PAK\0"
             magic = f.read(4)
-            logger.debug(f"Сигнатура: {magic!r}")
+            logger.debug(f"Signature: {magic!r}")
             if magic != b'PAK\x00':
-                raise ValueError("Неверный формат файла: отсутствует сигнатура PAK\\0")
+                raise ValueError("Invalid file format: missing PAK\\0 signature")
 
             # get DataOffset long
             DataOffset = struct.unpack('<I', f.read(4))[0]
@@ -103,35 +104,35 @@ def unpack_pak(pak_path, output_base, logger):
             fileSize = struct.unpack('<I', f.read(4))[0]
             logger.debug(f"fileSize = {fileSize}")
 
-            # get dummy short
-            dummy = struct.unpack('<H', f.read(2))[0]
-            logger.debug(f"dummy = {dummy}")
+            # get dummy short – purpose unknown
+            global_dummy = struct.unpack('<H', f.read(2))[0]
+            logger.debug(f"global_dummy = {global_dummy}")
 
             # get numFolder long
             numFolder = struct.unpack('<I', f.read(4))[0]
-            logger.info(f"Количество элементов верхнего уровня: {numFolder}")
+            logger.info(f"Number of top-level entries: {numFolder}")
 
             archive_basename = os.path.basename(pak_path)
             output_root = os.path.join(output_base, archive_basename)
             os.makedirs(output_root, exist_ok=True)
-            logger.debug(f"Создана корневая папка: {output_root}")
+            logger.debug(f"Created root folder: {output_root}")
 
             # for i = 0 < numFolder
             for i in range(numFolder):
                 folder_name = ""
-                logger.debug(f"--- Обработка элемента #{i+1} верхнего уровня ---")
+                logger.debug(f"--- Processing top-level element #{i+1} ---")
                 _unpack_entry(f, output_root, folder_name, DataOffset, logger)
 
-            logger.info("Распаковка успешно завершена.")
+            logger.info("Unpacking completed successfully.")
     except Exception as e:
-        logger.error(f"Критическая ошибка при распаковке: {e}")
+        logger.error(f"Critical error during unpacking: {e}")
         raise
 
 
 def _unpack_entry(f, output_root, folder_name, DataOffset, logger):
     """
-    Рекурсивная функция (StartFunction unpack).
-    ИСПРАВЛЕНИЕ: после чтения данных восстанавливаем позицию в архиве.
+    Recursive function (StartFunction unpack).
+    FIX: after reading data, restore the position in the archive.
     """
     # get namelen byte
     namelen = struct.unpack('<B', f.read(1))[0]
@@ -147,7 +148,7 @@ def _unpack_entry(f, output_root, folder_name, DataOffset, logger):
     logger.debug(f"type = {entry_type}")
 
     if entry_type == 0 or entry_type == 2:
-        # --- Тип 0 или 2: файл ---
+        # --- Type 0 or 2: file ---
         if entry_type == 0:
             # get offset long
             offset = struct.unpack('<I', f.read(4))[0]
@@ -162,61 +163,61 @@ def _unpack_entry(f, output_root, folder_name, DataOffset, logger):
         size = struct.unpack('<I', f.read(4))[0]
         logger.debug(f"  size = {size}")
 
-        # get dummy long
-        dummy = struct.unpack('<I', f.read(4))[0]
-        logger.debug(f"  dummy = {dummy}")
+        # get adler long – Adler-32 checksum of file content
+        adler = struct.unpack('<I', f.read(4))[0]
+        logger.debug(f"  adler = {adler}")
 
         # math offset += Dataoffset
         abs_offset = DataOffset + offset
-        logger.debug(f"  абсолютное смещение = {abs_offset} (0x{abs_offset:X})")
+        logger.debug(f"  absolute offset = {abs_offset} (0x{abs_offset:X})")
 
-        # Формирование пути
+        # Build path
         relative_path = folder_name + '/' + name
         while relative_path.startswith('/'):
             relative_path = relative_path[1:]
         full_path = os.path.join(output_root, relative_path)
-        logger.info(f"Извлечение файла: {relative_path} (смещение={abs_offset}, размер={size})")
+        logger.info(f"Extracting file: {relative_path} (offset={abs_offset}, size={size})")
 
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
-        # --- КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ ---
-        # Сохраняем текущую позицию (сразу после чтения заголовка)
+        # --- CRITICAL FIX ---
+        # Save current position (right after reading the header)
         saved_pos = f.tell()
         # log fname offset size
         f.seek(abs_offset)
         data = f.read(size)
         with open(full_path, 'wb') as out:
             out.write(data)
-        # Возвращаем позицию обратно, как в оригинальном log
+        # Restore position, just like the original log command does
         f.seek(saved_pos)
         # ---------------------------------
-        logger.debug(f"  записан файл: {full_path}")
+        logger.debug(f"  written file: {full_path}")
 
     elif entry_type == 1:
-        # --- Тип 1: папка ---
+        # --- Type 1: folder ---
         # string folderName += /
         # string folderName += name
         new_folder = folder_name + '/' + name
-        logger.debug(f"Вход в папку: {new_folder}")
+        logger.debug(f"Entering folder: {new_folder}")
 
         # get numEntry long
         numEntry = struct.unpack('<I', f.read(4))[0]
-        logger.debug(f"  количество элементов в папке: {numEntry}")
+        logger.debug(f"  number of entries in folder: {numEntry}")
 
         for j in range(numEntry):
             # set folderName2 string folderName
             folder_name_copy = new_folder
             _unpack_entry(f, output_root, folder_name_copy, DataOffset, logger)
-        logger.debug(f"Выход из папки: {new_folder}")
+        logger.debug(f"Leaving folder: {new_folder}")
 
     else:
-        msg = f"Обнаружен неподдерживаемый тип элемента: {entry_type}"
+        msg = f"Unsupported element type encountered: {entry_type}"
         logger.error(msg)
         raise NotImplementedError(msg)
 
 
 # ============================================================
-# Графический интерфейс (без изменений, только интеграция логгера)
+# Graphical interface
 # ============================================================
 class PakUnpackerApp:
     def __init__(self, root):
@@ -232,44 +233,41 @@ class PakUnpackerApp:
         self.setup_ui()
         self.load_settings()
 
-    # ... (остальной код интерфейса идентичен предыдущему ответу)
-    # Я приведу только ключевые методы, остальное без изменений.
-
     def setup_ui(self):
         tf = ttk.Frame(self.root, padding=5)
         tf.pack(fill=tk.X, side=tk.TOP)
 
-        ttk.Label(tf, text="PAK файл:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        ttk.Label(tf, text="PAK file:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         ttk.Entry(tf, textvariable=self.pak_path, width=50).grid(row=0, column=1, padx=5, pady=5)
-        ttk.Button(tf, text="Обзор...", command=self.browse_pak).grid(row=0, column=2, padx=5, pady=5)
+        ttk.Button(tf, text="Browse...", command=self.browse_pak).grid(row=0, column=2, padx=5, pady=5)
 
-        ttk.Label(tf, text="Папка для распаковки:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        ttk.Label(tf, text="Output folder:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         ttk.Entry(tf, textvariable=self.output_path, width=50).grid(row=1, column=1, padx=5, pady=5)
-        ttk.Button(tf, text="Обзор...", command=self.browse_output).grid(row=1, column=2, padx=5, pady=5)
+        ttk.Button(tf, text="Browse...", command=self.browse_output).grid(row=1, column=2, padx=5, pady=5)
 
         cf = ttk.Frame(self.root, padding=5)
         cf.pack(fill=tk.X, side=tk.TOP)
 
-        self.extract_btn = ttk.Button(cf, text="Распаковать", command=self.start_extraction)
+        self.extract_btn = ttk.Button(cf, text="Unpack", command=self.start_extraction)
         self.extract_btn.grid(row=0, column=0, padx=5, pady=5)
 
         self.progress = ttk.Progressbar(cf, mode='indeterminate', length=200)
         self.progress.grid(row=0, column=1, padx=5, pady=5)
 
-        self.status_label = ttk.Label(cf, text="Готов", foreground="gray")
+        self.status_label = ttk.Label(cf, text="Ready", foreground="gray")
         self.status_label.grid(row=0, column=2, padx=5, pady=5, sticky='w')
 
-        lf = ttk.LabelFrame(self.root, text="Уровень логирования", padding=5)
+        lf = ttk.LabelFrame(self.root, text="Log level", padding=5)
         lf.pack(fill=tk.X, side=tk.TOP, padx=5, pady=5)
 
-        ttk.Radiobutton(lf, text="Подробно", variable=self.log_level_var, value=LOG_DEBUG,
+        ttk.Radiobutton(lf, text="Detailed", variable=self.log_level_var, value=LOG_DEBUG,
                         command=self.on_log_level_changed).pack(side=tk.LEFT, padx=10)
-        ttk.Radiobutton(lf, text="Кратко", variable=self.log_level_var, value=LOG_INFO,
+        ttk.Radiobutton(lf, text="Brief", variable=self.log_level_var, value=LOG_INFO,
                         command=self.on_log_level_changed).pack(side=tk.LEFT, padx=10)
-        ttk.Radiobutton(lf, text="Только ошибки", variable=self.log_level_var, value=LOG_ERROR,
+        ttk.Radiobutton(lf, text="Errors only", variable=self.log_level_var, value=LOG_ERROR,
                         command=self.on_log_level_changed).pack(side=tk.LEFT, padx=10)
 
-        logf = ttk.LabelFrame(self.root, text="Лог", padding=5)
+        logf = ttk.LabelFrame(self.root, text="Log", padding=5)
         logf.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=5, pady=5)
 
         self.log_text = scrolledtext.ScrolledText(logf, height=15, state='disabled', wrap=tk.WORD)
@@ -278,16 +276,16 @@ class PakUnpackerApp:
         self.logger = AppLogger(self.root, self.log_text, level=self.log_level_var.get())
 
     def browse_pak(self):
-        fn = filedialog.askopenfilename(title="Выберите PAK файл", filetypes=[("PAK files", "*.pak"), ("All files", "*.*")])
+        fn = filedialog.askopenfilename(title="Select PAK file", filetypes=[("PAK files", "*.pak"), ("All files", "*.*")])
         if fn:
             self.pak_path.set(fn)
-            self.logger.info(f"Выбран PAK: {fn}")
+            self.logger.info(f"Selected PAK: {fn}")
 
     def browse_output(self):
-        dn = filedialog.askdirectory(title="Выберите папку для распаковки")
+        dn = filedialog.askdirectory(title="Select output folder for extraction")
         if dn:
             self.output_path.set(dn)
-            self.logger.info(f"Выбрана папка назначения: {dn}")
+            self.logger.info(f"Selected output folder: {dn}")
 
     def on_log_level_changed(self):
         new_level = self.log_level_var.get()
@@ -298,30 +296,30 @@ class PakUnpackerApp:
         pak = self.pak_path.get()
         out = self.output_path.get()
         if not pak:
-            self.logger.error("Не указан PAK файл.")
-            self.set_status("Ошибка: укажите PAK файл", "red")
+            self.logger.error("No PAK file specified.")
+            self.set_status("Error: specify a PAK file", "red")
             return
         if not out:
-            self.logger.error("Не указана папка для распаковки.")
-            self.set_status("Ошибка: укажите папку назначения", "red")
+            self.logger.error("No output folder specified.")
+            self.set_status("Error: specify an output folder", "red")
             return
         if not os.path.isfile(pak):
-            self.logger.error(f"Файл {pak} не существует.")
-            self.set_status("Ошибка: файл не найден", "red")
+            self.logger.error(f"File {pak} does not exist.")
+            self.set_status("Error: file not found", "red")
             return
 
         self.save_settings()
         self.extract_btn.configure(state='disabled')
         self.progress.start()
-        self.set_status("Идёт распаковка...", "blue")
+        self.set_status("Unpacking...", "blue")
         threading.Thread(target=self.run_extraction, args=(pak, out), daemon=True).start()
 
     def run_extraction(self, pak, out):
         try:
             unpack_pak(pak, out, self.logger)
-            self.root.after(0, self.extraction_done, "Распаковка успешно завершена", "green")
+            self.root.after(0, self.extraction_done, "Unpacking completed successfully", "green")
         except Exception as e:
-            self.root.after(0, self.extraction_done, f"Ошибка: {e}", "red")
+            self.root.after(0, self.extraction_done, f"Error: {e}", "red")
 
     def extraction_done(self, message, color):
         self.progress.stop()
@@ -348,9 +346,9 @@ class PakUnpackerApp:
                     if level in (LOG_DEBUG, LOG_INFO, LOG_ERROR):
                         self.log_level_var.set(level)
                         self.logger.change_level(level)
-            self.logger.info("Настройки загружены")
+            self.logger.info("Settings loaded")
         except Exception as e:
-            self.logger.error(f"Ошибка загрузки настроек: {e}")
+            self.logger.error(f"Error loading settings: {e}")
 
     def save_settings(self):
         config = configparser.ConfigParser()

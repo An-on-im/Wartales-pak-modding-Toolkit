@@ -1,3 +1,4 @@
+# pack.py
 import os
 import struct
 import zlib
@@ -8,7 +9,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk, scrolledtext
 
 # ============================================================
-# Конфигурация и логгер
+# Configuration and logger
 # ============================================================
 CONFIG_FILE = "pak_updater.ini"
 LOG_FILE    = "pak_updater.log"
@@ -18,13 +19,13 @@ LOG_INFO  = 20
 LOG_ERROR = 30
 
 LEVEL_NAMES = {
-    LOG_DEBUG: "Подробно",
-    LOG_INFO:  "Кратко",
-    LOG_ERROR: "Только ошибки"
+    LOG_DEBUG: "Detailed",
+    LOG_INFO:  "Brief",
+    LOG_ERROR: "Errors only"
 }
 
 class AppLogger:
-    """Потокобезопасный логгер с выводом в GUI и записью в файл."""
+    """Thread-safe logger with GUI output and file recording."""
     def __init__(self, root, gui_widget, level=LOG_INFO):
         self.root = root
         self.widget = gui_widget
@@ -36,11 +37,11 @@ class AppLogger:
         with self.lock:
             with open(LOG_FILE, 'a', encoding='utf-8') as f:
                 f.write(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S}, "
-                        f"уровень: {LEVEL_NAMES.get(self.level, '?')} =====\n")
+                        f"level: {LEVEL_NAMES.get(self.level, '?')} =====\n")
 
     def change_level(self, new_level):
         self.level = new_level
-        self._log_text(f"Уровень логирования изменён на: "
+        self._log_text(f"Log level changed to: "
                        f"{LEVEL_NAMES.get(new_level, new_level)}\n", "blue")
 
     def _log_text(self, message, color_tag=None):
@@ -78,61 +79,60 @@ class AppLogger:
 
 
 # ============================================================
-# Основная функция обновления PAK
+# Main PAK update function
 # ============================================================
 def update_pak_in_memory(original_path, extracted_root, output_path, logger):
     """
-    Загружает TOC в память, проходит по нему, заменяет изменённые файлы,
-    формирует полный PAK в bytearray и сохраняет в output_path.
+    Loads TOC into memory, iterates through it, replaces modified files,
+    builds a complete PAK in a bytearray and saves it to output_path.
     """
-    logger.info(f"Начало обновления: {original_path}")
-    # Открываем оригинальный PAK
+    logger.info(f"Starting update: {original_path}")
+    # Open original PAK
     with open(original_path, 'rb') as f:
-        # --- Глобальный заголовок ---
+        # --- Global header ---
         magic = f.read(4)
         if magic != b'PAK\x00':
-            raise ValueError("Неверная сигнатура PAK")
+            raise ValueError("Invalid PAK signature")
 
-        DataOffset = struct.unpack('<I', f.read(4))[0]   # смещение до данных
-        fileSize   = struct.unpack('<I', f.read(4))[0]   # оригинальный размер
-        global_dummy = struct.unpack('<H', f.read(2))[0] # 2 байта
-        numFolder  = struct.unpack('<I', f.read(4))[0]   # число элементов верхнего уровня
+        DataOffset = struct.unpack('<I', f.read(4))[0]   # offset to data area
+        fileSize   = struct.unpack('<I', f.read(4))[0]   # original file size
+        global_dummy = struct.unpack('<H', f.read(2))[0] # 2 bytes, purpose unknown
+        numFolder  = struct.unpack('<I', f.read(4))[0]   # number of top-level entries
 
-        # Читаем весь TOC (оглавление) в память
+        # Read the whole TOC (table of contents) into memory
         toc_size = DataOffset - 18
         toc_bytes = bytearray(f.read(toc_size))
 
-    # Создаём выходной буфер: заголовок + TOC
-    # Заголовок пока заполним оригинальными значениями, fileSize обновим позже
+    # Prepare output buffer: header + TOC
     header = bytearray(18)
     header[0:4] = magic
     struct.pack_into('<I', header, 4, DataOffset)
-    # fileSize пока 0, запишем в конце
+    # fileSize initially 0, will be fixed later
     struct.pack_into('<H', header, 12, global_dummy)
     struct.pack_into('<I', header, 14, numFolder)
 
-    # Выходной буфер будет содержать заголовок + TOC, потом данные
+    # Output buffer contains header + TOC, then data
     out_buf = bytearray(header)
-    out_buf.extend(toc_bytes)  # добавляем оригинальный TOC (будем модифицировать прямо в нём)
+    out_buf.extend(toc_bytes)  # add original TOC (we will modify it in place)
 
-    # Смещение TOC в out_buf (после заголовка)
+    # TOC offset in out_buf (after header)
     TOC_START = 18
-    data_buf = bytearray()   # собираем здесь область данных
+    data_buf = bytearray()   # we collect the data area here
 
-    # Текущее смещение в данных (относительно DataOffset)
+    # Current offset in the data area (relative to DataOffset)
     current_data_offset = 0
 
-    # Рекурсивный обход TOC в out_buf с одновременным чтением из оригинального PAK для неизменённых файлов
+    # Recursively traverse TOC in out_buf while reading original data for unchanged files
     orig_file = open(original_path, 'rb')
 
     def read_orig_data(offset, size):
-        """Чтение оригинальных данных файла по абсолютному смещению."""
+        """Read original file data from absolute position."""
         orig_file.seek(offset)
         return orig_file.read(size)
 
     def process_entries(toc_idx, count, parent_path=""):
-        """Обрабатывает count элементов, начиная с toc_idx в out_buf.
-        Возвращает новый toc_idx после обработки всех count элементов."""
+        """Process 'count' entries starting at toc_idx in out_buf.
+        Returns the new toc_idx after all entries."""
         nonlocal current_data_offset
         idx = toc_idx
         for _ in range(count):
@@ -147,15 +147,15 @@ def update_pak_in_memory(original_path, extracted_root, output_path, logger):
             etype = out_buf[idx]
             idx += 1
 
-            if etype == 1:  # папка
+            if etype == 1:  # folder
                 numEntry = struct.unpack_from('<I', out_buf, idx)[0]
                 idx += 4
                 new_path = parent_path + "/" + name if parent_path else name
                 idx = process_entries(idx, numEntry, new_path)
-            elif etype in (0, 2):  # файл
-                # Запомнили позицию offset-поля в out_buf
+            elif etype in (0, 2):  # file
+                # Remember the offset field position in out_buf
                 offset_pos = idx
-                # Читаем оригинальные поля
+                # Read original fields
                 if etype == 0:
                     orig_offset = struct.unpack_from('<I', out_buf, idx)[0]
                     idx += 4
@@ -165,13 +165,13 @@ def update_pak_in_memory(original_path, extracted_root, output_path, logger):
                 size_pos = idx
                 orig_size = struct.unpack_from('<I', out_buf, idx)[0]
                 idx += 4
-                dummy_pos = idx
-                orig_dummy = struct.unpack_from('<I', out_buf, idx)[0]
+                adler_pos = idx
+                orig_adler = struct.unpack_from('<I', out_buf, idx)[0]  # Adler-32 checksum of file data
                 idx += 4
 
-                # Формируем относительный путь
+                # Build relative path
                 rel_path = parent_path + "/" + name if parent_path else name
-                # Проверяем наличие файла на диске
+                # Check if the file exists in the extracted folder
                 disk_full_path = os.path.join(extracted_root, rel_path)
                 modified = False
                 if os.path.isfile(disk_full_path):
@@ -179,72 +179,63 @@ def update_pak_in_memory(original_path, extracted_root, output_path, logger):
                         disk_data = disk_f.read()
                     new_adler = zlib.adler32(disk_data) & 0xFFFFFFFF
                     new_size = len(disk_data)
-                    if new_adler != orig_dummy or new_size != orig_size:
+                    if new_adler != orig_adler or new_size != orig_size:
                         modified = True
-                    else:
-                        # Не изменён, но на всякий случай проверим
-                        pass
                 else:
-                    # Файл отсутствует в распакованной папке – оставляем оригинал
-                    logger.info(f"Файл отсутствует на диске: {rel_path}, оставлен оригинал.")
+                    # File missing in extracted folder – keep the original
+                    logger.info(f"File missing on disk: {rel_path}, keeping original.")
                     modified = False
 
-                # Вычисляем новый offset для этого файла
+                # Compute new offset for this file
                 new_offset = current_data_offset
-                # Записываем offset в out_buf
+                # Write new offset into out_buf
                 if etype == 0:
                     struct.pack_into('<I', out_buf, offset_pos, new_offset)
                 else:
                     struct.pack_into('<d', out_buf, offset_pos, float(new_offset))
 
                 if modified:
-                    logger.info(f"Изменён: {rel_path} (новый размер={new_size})")
-                    # Записываем size и dummy
+                    logger.info(f"Modified: {rel_path} (new size={new_size})")
+                    # Update size and Adler checksum
                     struct.pack_into('<I', out_buf, size_pos, new_size)
-                    struct.pack_into('<I', out_buf, dummy_pos, new_adler)
-                    # Добавляем новые данные в data_buf
+                    struct.pack_into('<I', out_buf, adler_pos, new_adler)
+                    # Append new data to data_buf
                     data_buf.extend(disk_data)
                     current_data_offset += new_size
                 else:
-                    logger.debug(f"Не изменён: {rel_path}")
-                    # size и dummy не меняем (они уже правильные)
-                    # Но нужно обновить? Если файл не изменён, но предыдущие файлы изменились,
-                    # то его offset уже обновлён, а size и dummy остаются прежними.
-                    # Это корректно.
-                    # Читаем оригинальные данные по старому смещению
+                    logger.debug(f"Unchanged: {rel_path}")
+                    # size and Adler remain unchanged; offset already updated.
+                    # Read original data from the original PAK
                     orig_abs = DataOffset + orig_offset
                     orig_data = read_orig_data(orig_abs, orig_size)
                     data_buf.extend(orig_data)
                     current_data_offset += orig_size
             else:
-                raise ValueError(f"Неизвестный тип элемента {etype}")
+                raise ValueError(f"Unknown element type {etype}")
         return idx
 
-    # Запускаем обход
+    # Start traversal
     process_entries(TOC_START, numFolder, "")
 
-    # Теперь в data_buf все данные в правильном порядке.
-    # Добавляем их к out_buf начиная с позиции DataOffset.
-    # Так как out_buf уже содержит заголовок и TOC, нужно дописать данные.
-    # out_buf должен быть длины DataOffset + len(data_buf)
-    # assert len(out_buf) == DataOffset, "TOC размер должен точно соответствовать DataOffset"
+    # Now data_buf contains all files in the correct order.
+    # Append it to out_buf starting at DataOffset position.
     out_buf.extend(data_buf)
 
-    # Вычисляем итоговый размер файла
+    # Compute final file size
     final_size = len(out_buf)
-    # Обновляем fileSize в заголовке (смещение 8)
+    # Update fileSize in the header (offset 8)
     struct.pack_into('<I', out_buf, 8, final_size)
 
-    # Записываем результат в output_path
+    # Write result to output_path
     with open(output_path, 'wb') as f:
         f.write(out_buf)
 
     orig_file.close()
-    logger.info(f"Готово. Новый PAK сохранён: {output_path}, размер={final_size} байт.")
+    logger.info(f"Done. New PAK saved: {output_path}, size={final_size} bytes.")
 
 
 # ============================================================
-# GUI приложение
+# GUI application
 # ============================================================
 class PakUpdaterApp:
     def __init__(self, root):
@@ -265,40 +256,40 @@ class PakUpdaterApp:
         top = ttk.Frame(self.root, padding=5)
         top.pack(fill=tk.X, side=tk.TOP)
 
-        ttk.Label(top, text="Оригинальный PAK:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        ttk.Label(top, text="Original PAK:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         ttk.Entry(top, textvariable=self.original_pak, width=50).grid(row=0, column=1, padx=5, pady=5)
-        ttk.Button(top, text="Обзор...", command=self.browse_original).grid(row=0, column=2, padx=5, pady=5)
+        ttk.Button(top, text="Browse...", command=self.browse_original).grid(row=0, column=2, padx=5, pady=5)
 
-        ttk.Label(top, text="Распакованная папка:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        ttk.Label(top, text="Extracted folder:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         ttk.Entry(top, textvariable=self.extracted_dir, width=50).grid(row=1, column=1, padx=5, pady=5)
-        ttk.Button(top, text="Обзор...", command=self.browse_extracted).grid(row=1, column=2, padx=5, pady=5)
+        ttk.Button(top, text="Browse...", command=self.browse_extracted).grid(row=1, column=2, padx=5, pady=5)
 
-        ttk.Label(top, text="Сохранить как:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        ttk.Label(top, text="Save as:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
         ttk.Entry(top, textvariable=self.output_pak, width=50).grid(row=2, column=1, padx=5, pady=5)
-        ttk.Button(top, text="Обзор...", command=self.browse_output).grid(row=2, column=2, padx=5, pady=5)
+        ttk.Button(top, text="Browse...", command=self.browse_output).grid(row=2, column=2, padx=5, pady=5)
 
         ctrl = ttk.Frame(self.root, padding=5)
         ctrl.pack(fill=tk.X, side=tk.TOP)
 
-        self.btn_update = ttk.Button(ctrl, text="Обновить архив", command=self.start_update)
+        self.btn_update = ttk.Button(ctrl, text="Update archive", command=self.start_update)
         self.btn_update.grid(row=0, column=0, padx=5, pady=5)
 
         self.progress = ttk.Progressbar(ctrl, mode='indeterminate', length=200)
         self.progress.grid(row=0, column=1, padx=5, pady=5)
 
-        self.status = ttk.Label(ctrl, text="Готов", foreground="gray")
+        self.status = ttk.Label(ctrl, text="Ready", foreground="gray")
         self.status.grid(row=0, column=2, padx=5, pady=5, sticky='w')
 
-        # Уровень логирования
-        lvl_frame = ttk.LabelFrame(self.root, text="Уровень логирования", padding=5)
+        # Log level selection
+        lvl_frame = ttk.LabelFrame(self.root, text="Log level", padding=5)
         lvl_frame.pack(fill=tk.X, side=tk.TOP, padx=5, pady=5)
 
-        for val, txt in [(LOG_DEBUG, "Подробно"), (LOG_INFO, "Кратко"), (LOG_ERROR, "Только ошибки")]:
+        for val, txt in [(LOG_DEBUG, "Detailed"), (LOG_INFO, "Brief"), (LOG_ERROR, "Errors only")]:
             ttk.Radiobutton(lvl_frame, text=txt, variable=self.log_level_var, value=val,
                             command=self.on_loglevel_changed).pack(side=tk.LEFT, padx=10)
 
-        # Лог
-        log_frame = ttk.LabelFrame(self.root, text="Лог", padding=5)
+        # Log window
+        log_frame = ttk.LabelFrame(self.root, text="Log", padding=5)
         log_frame.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=5, pady=5)
 
         self.log_widget = scrolledtext.ScrolledText(log_frame, height=15, state='disabled', wrap=tk.WORD)
@@ -307,20 +298,19 @@ class PakUpdaterApp:
         self.logger = AppLogger(self.root, self.log_widget, level=self.log_level_var.get())
 
     def browse_original(self):
-        path = filedialog.askopenfilename(title="Оригинальный PAK", filetypes=[("PAK files", "*.pak"), ("All files", "*.*")])
+        path = filedialog.askopenfilename(title="Original PAK", filetypes=[("PAK files", "*.pak"), ("All files", "*.*")])
         if path:
             self.original_pak.set(path)
-            # Автоматически предложим выходной путь (рядом, с суффиксом _updated)
             base, ext = os.path.splitext(path)
             self.output_pak.set(base + "_updated" + ext)
 
     def browse_extracted(self):
-        path = filedialog.askdirectory(title="Распакованная папка")
+        path = filedialog.askdirectory(title="Extracted folder")
         if path:
             self.extracted_dir.set(path)
 
     def browse_output(self):
-        path = filedialog.asksaveasfilename(title="Сохранить обновлённый PAK", defaultextension=".pak",
+        path = filedialog.asksaveasfilename(title="Save updated PAK as", defaultextension=".pak",
                                             filetypes=[("PAK files", "*.pak")])
         if path:
             self.output_pak.set(path)
@@ -335,31 +325,31 @@ class PakUpdaterApp:
         extr = self.extracted_dir.get()
         out  = self.output_pak.get()
         if not orig or not extr or not out:
-            self.logger.error("Не все поля заполнены.")
-            self.set_status("Заполните все поля", "red")
+            self.logger.error("All fields must be filled.")
+            self.set_status("Fill all fields", "red")
             return
         if not os.path.isfile(orig):
-            self.logger.error("Оригинальный PAK не найден.")
-            self.set_status("Файл не найден", "red")
+            self.logger.error("Original PAK not found.")
+            self.set_status("File not found", "red")
             return
         if not os.path.isdir(extr):
-            self.logger.error("Распакованная папка не существует.")
-            self.set_status("Папка не найдена", "red")
+            self.logger.error("Extracted folder does not exist.")
+            self.set_status("Folder not found", "red")
             return
 
         self.save_settings()
         self.btn_update.config(state='disabled')
         self.progress.start()
-        self.set_status("Обновление...", "blue")
+        self.set_status("Updating...", "blue")
         threading.Thread(target=self.run_update, args=(orig, extr, out), daemon=True).start()
 
     def run_update(self, orig, extr, out):
         try:
             update_pak_in_memory(orig, extr, out, self.logger)
-            self.root.after(0, self.done, f"Готово: {out}", "green")
+            self.root.after(0, self.done, f"Done: {out}", "green")
         except Exception as e:
             self.logger.error(str(e))
-            self.root.after(0, self.done, f"Ошибка: {e}", "red")
+            self.root.after(0, self.done, f"Error: {e}", "red")
 
     def done(self, msg, color):
         self.progress.stop()
@@ -388,9 +378,9 @@ class PakUpdaterApp:
                     if lvl in (LOG_DEBUG, LOG_INFO, LOG_ERROR):
                         self.log_level_var.set(lvl)
                         self.logger.change_level(lvl)
-            self.logger.info("Настройки загружены")
+            self.logger.info("Settings loaded")
         except Exception as e:
-            self.logger.error(f"Ошибка загрузки настроек: {e}")
+            self.logger.error(f"Error loading settings: {e}")
 
     def save_settings(self):
         cfg = configparser.ConfigParser()
