@@ -180,17 +180,12 @@ def _unpack_entry(f, output_root, folder_name, DataOffset, logger):
 
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
-        # --- CRITICAL FIX ---
-        # Save current position (right after reading the header)
         saved_pos = f.tell()
-        # log fname offset size
         f.seek(abs_offset)
         data = f.read(size)
         with open(full_path, 'wb') as out:
             out.write(data)
-        # Restore position, just like the original log command does
         f.seek(saved_pos)
-        # ---------------------------------
         logger.debug(f"  written file: {full_path}")
 
     elif entry_type == 1:
